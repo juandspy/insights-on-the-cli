@@ -1,0 +1,27 @@
+#!/bin/bash
+
+source common.sh
+
+echo $recommendations | jq -r '
+  [
+    "Rule_ID",
+    "Created_At",
+    "Description",
+    "Details",
+    "Reason",
+    "Resolution",
+    "Total_Risk",
+    "Disabled"
+  ] as $headers |
+  ($headers | join("\t")),
+  ($headers | map(length * "=") | join("\t")),
+  (.report.data[] | [
+    .rule_id,
+    .created_at,
+    .description,
+    .details,
+    .reason,
+    .resolution,
+    .total_risk,
+    .disabled
+  ] | @tsv)' | column -t

@@ -1,0 +1,8 @@
+#!/bin/bash
+
+# Fetch the data and display in a table
+oc get insightsoperators -o json | jq -r '
+  ["NAME", "DESCRIPTION", "STATE", "TOTAL_RISK", "ADVISOR_URI"] as $headers |
+  ($headers | join("\t")),
+  ($headers | map(length * "=") | join("\t")),
+  (.items[0].status.insightsReport.healthChecks[] | [(.advisorURI | split("%7C")[1]), .description, .state, .totalRisk, .advisorURI] | @tsv)' | column -t
