@@ -1,0 +1,75 @@
+apiVersion: apiextensions.k8s.io/v1
+kind: CustomResourceDefinition
+metadata:
+  name: recommendations.monitoring.openshift.io
+spec:
+  group: monitoring.openshift.io  # I'm not sure I should be using this group
+  scope: Cluster
+  names:
+    kind: Recommendation
+    listKind: RecommendationList
+    plural: recommendations
+    singular: recommendation
+  versions:
+    - name: v1
+      served: true
+      storage: true
+      schema:
+        openAPIV3Schema:
+          type: object
+          properties:
+            spec:
+              type: object
+              properties:
+                description:
+                  type: string
+                created_at:
+                  type: string
+                  format: date-time
+                details:
+                  type: string
+                disable_feedback:
+                  type: string
+                disabled:
+                  type: boolean
+                disabled_at:
+                  type: string
+                  format: date-time
+                extra_data:
+                  type: object
+                  properties:
+                    error_key:
+                      type: string
+                    type:
+                      type: string
+                internal:
+                  type: boolean
+                reason:
+                  type: string
+                resolution:
+                  type: string
+                rule_id:
+                  type: string
+                tags:
+                  type: array
+                  items:
+                    type: string
+                total_risk:
+                  type: integer
+                user_vote:
+                  type: integer
+      additionalPrinterColumns:
+      - jsonPath: .spec.description
+        name: Description
+        type: string
+        priority: 1  # This indicates it should be included in the wide output
+      - jsonPath: .spec.created_at
+        name: Created At
+        type: string
+      - jsonPath: .spec.total_risk
+        name: Total Risk
+        type: integer
+      - jsonPath: .spec.details
+        name: Details
+        type: string
+        priority: 1  # Wide output
