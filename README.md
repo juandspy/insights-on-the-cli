@@ -10,6 +10,9 @@
 This repo researches different ways of achieving an `oc get recommendations`
 command to show the OCP Advisor recommendations on the CLI.
 
+If you want to render the slides you can run `python3 -m http.server` and
+access http://localhost:8000/presentation.html.
+
 ## Using plugins
 
 Writing plugins is quite straightforward, but cannot be automatically shipped

@@ -1,0 +1,400 @@
+<title>Title</title>
+<style>
+  @import url(https://fonts.googleapis.com/css?family=Yanone+Kaffeesatz);
+  @import url(https://fonts.googleapis.com/css?family=Droid+Serif:400,700,400italic);
+  @import url(https://fonts.googleapis.com/css?family=Ubuntu+Mono:400,700,400italic);
+
+  body {
+    font-family: 'Droid Serif';
+  }
+
+  h1,
+  h2,
+  h3 {
+    font-family: 'Yanone Kaffeesatz';
+    font-weight: normal;
+  }
+
+  .remark-code,
+  .remark-inline-code {
+    font-family: 'Ubuntu Mono';
+  }
+
+  table {
+    border-collapse: collapse;
+  }
+  th, td {
+      padding: 5px;
+      border: 1px solid black;
+  }
+
+</style>
+<textarea id="source">
+
+
+    class: center, middle
+
+    # Insights on the CLI
+    
+    .left[
+
+    ```sh
+    $ oc get recommendations
+    NAME                                                     CREATED AT             TOTAL RISK
+    ccx-rules-ocp.external.rules.operator-unmanaged.report   2021-01-11T16:00:00Z   2
+    ```]
+
+    ---
+    
+    # Agenda
+    
+    1. Goal
+    2. Using Plugins
+    3. Using Custom Resource Definitions
+    4. Comparison
+    5. Next steps
+    
+    ---
+    
+    # 1. Goal
+
+    Give OCP administrators and SREs an easier way to consume recommendations.
+
+    --
+
+    ```sh
+    $ oc get recommendations
+    NAME               CREATED AT             TOTAL RISK
+    RECOMMENDATION_1   2021-01-11T16:00:00Z   1
+    RECOMMENDATION_2   2021-02-11T16:00:00Z   2
+    ```
+
+    --
+
+    - Integrations
+    - Automation
+    - The Kubernetes way
+  
+    ---
+
+    class: center, middle
+
+    Do we already have that data?
+
+    ---
+
+    ## Insights Operator CR
+
+    ```sh
+    $ oc get insightsoperators -o json | jq '.items[0].status.insightsReport.healthChecks'
+    [
+      {
+        "advisorURI": "https://console.redhat.com/openshift/insights/advisor/clusters/3105ebec-8b14-4c8e-b3d7-3875bf1c3271?first=ccx_rules_ocp.external.rules.operator_unmanaged%7COPERATOR_UNMANAGED",
+        "description": "OpenShift cluster can get damaged when an operator is configured to 'Unmanaged' state",
+        "state": "Enabled",
+        "totalRisk": 2
+      }
+    ]
+    ```
+
+    --
+
+    ## console.redhat.com API
+
+    ```sh
+    $ curl https://console.redhat.com/api/insights-results-aggregator/v2/cluster/$cluster_id/reports | jq .report.data
+    [
+      {
+        "rule_id": "ccx_rules_ocp.external.rules.operator_unmanaged.report",
+        "created_at": "2021-01-11T16:00:00Z",
+        "description": "OpenShift cluster can get damaged when an operator is configured to 'Unmanaged' state",
+        "details": "OpenShift cluster can get damaged when an operator is configured to 'Unmanaged' state.",
+        "more_info": "",
+        "total_risk": 2,
+        ...
+      }
+    ]
+    ```
+
+    ---
+    
+    # 2. Using Plugins
+    
+    <div class="mermaid">
+      flowchart LR
+        LE[Local executable<br>oc-foo / kubectl-foo]
+        OC[oc/kubectl foo]
+        OCP[Kubernetes/OCP]
+    
+        OC --> LE
+        LE --> OCP
+    </div>
+
+    ---
+
+    # 2. Using Plugins
+    
+    ## 2.1 Using Insights Operator CRs
+
+    --
+
+    ```sh
+    #!/bin/bash
+
+    # Fetch the data and display in a table
+    oc get insightsoperators -o json | jq -r '
+      ["NAME", "DESCRIPTION", "STATE", "TOTAL_RISK", "ADVISOR_URI"] as $headers |
+      ($headers | join("\t")),
+      ($headers | map(length * "=") | join("\t")),
+      (.items[0].status.insightsReport.healthChecks[] | [(.advisorURI | split("%7C")[1]), .description, .state, .totalRisk, .advisorURI] | @tsv)' | column -t
+    ```
+    
+    --
+
+    ```sh
+    $ oc recommendations
+    NAME    DESCRIPTION     STATE   TOTAL_RISK      ADVISOR_URI
+    ====    ===========     =====   ==========      ===========
+    OPERATOR_UNMANAGED      OpenShift cluster can get damaged when an operator is configured to 'Unmanaged' state   Enabled 2       https://console.redhat.com/openshift/insights/advisor/clusters/3105ebec-8b14-4c8e-b3d7-3875bf1c3271?first=ccx_rules_ocp.external.rules.operator_unmanaged%7COPERATOR_UNMANAGED
+    ```
+
+    --
+
+    > Just a few fields :(
+
+    ---
+
+    # 2. Using Plugins
+
+    ## 2.2 Using console.redhat.com API
+
+    --
+
+    ```sh
+    token=$(oc extract secret/pull-secret -n openshift-config --to=- | jq '.auths."cloud.openshift.com".auth' | sed -e 's/^"//' -e 's/"$//')
+
+    cluster_id=$(oc get clusterversion -o jsonpath='{.items[].spec.clusterID}')
+    io_hash=$(git ls-remote https://github.com/openshift/insights-operator.git HEAD |cut -f1)
+    
+    recommendations=$(curl -s https://console.redhat.com/api/insights-results-aggregator/v2/cluster/$cluster_id/reports -H 'accept: application/json' -H "User-Agent: insights-operator/${io_hash} cluster/${cluster_id}" -H 'Content-Type: application/json' -H "Authorization: Bearer ${token}")
+    
+    echo $recommendations | jq ...
+    ```
+
+    --
+
+    ```sh
+    $ oc recommendations api
+    Rule_ID                                                 Created_At            Description  Details  Reason  Resolution  Total_Risk  Disabled
+    =======                                                 ==========            ===========  =======  ======  ==========  ==========  ========
+    ccx_rules_ocp.external.rules.operator_unmanaged.report  2021-01-11T16:00:00Z  OpenShift    cluster  can     get         damaged     when      an  operator  is  configured  to  'Unmanaged'  state  OpenShift  cluster  can  get  damaged  when  an  operator  is  configured  to  'Unmanaged'  state.  {{?pydata.unmanaged_operators.length  >  1}}The  following  operators  have  the  `managementState`  parameter  set  to  `Unmanaged`.  {{??}}The  following  operator  has  the  `managementState`  parameter  set  to  `Unmanaged`.  {{?}}Some  Operators  might  not  support  this  management  state  as  it  might  damage  the  cluster  and  require  manual  recovery.\n\n**Operator  Name:**\n{{~pydata.unmanaged_operators:item}}\n-  {{=item}}\n{{~}}\n  Red  Hat  recommends  that  you  configure  the  operator  parameter  `managementState`  to  `Managed`.\n\nExample:\n{{~pydata.unmanaged_operators:item}}\n~~~\n#  oc  patch  oc/{{=item}}  --type='merge'  -p  '{"Spec":{"managementState":  "Managed"}}'\n~~~\n{{~}}\n  2  false
+    ```
+
+    --
+
+    Much more information :)
+
+    ---
+
+    # 3. Using Custom Resource Definitions
+
+    <div class="mermaid">
+      flowchart TB
+      OCP@{ shape: cyl, label: "Kubernetes/OCP" }
+      subgraph Periodically
+          direction LR
+          C[Controller]
+          CR([Custom Resource])
+          C --Create--> CR
+          CR --> C
+          C --Store-->OCP
+          C --Update-->OCP
+      end
+      OC[oc/kubectl foo]
+  
+      OC <--> OCP
+    </div>
+
+    ---
+    
+    # 3. Using Custom Resource Definitions
+
+    ### Recommendation definition
+    --
+
+    ```yaml
+    apiVersion: apiextensions.k8s.io/v1
+    kind: CustomResourceDefinition
+    metadata:
+      name: recommendations.monitoring.openshift.io
+    spec:
+      group: monitoring.openshift.io
+      scope: Cluster
+      names:
+        kind: Recommendation
+        listKind: RecommendationList
+        plural: recommendations       # oc get recommendations
+        singular: recommendation      # oc get recommendation
+      versions:
+        - name: v1
+          schema:
+            openAPIV3Schema:
+              type: object
+              properties:
+                spec:
+                  type: object
+                  properties:
+                    description:
+                      type: string
+                    ...
+    ```
+    ---
+
+    # 3. Using Custom Resource Definitions
+    ### Controller definition
+
+    ```python
+    if __name__ == "__main__":
+        # Fetch new recommendations
+        recommendations = fetch_recommendations()
+
+        # Clean up existing CRDs if everything went fine
+        delete_existing_crds()
+
+        # Write each recommendation as a custom resource
+        for rec in recommendations["report"]["data"]:
+            create_recommendation_crd(rec)
+    ```
+
+    ---
+    # 3. Using Custom Resource Definitions
+    ### Controller definition
+
+    ```python
+    def create_recommendation_crd(recommendation):
+      ...
+      crd_body = {
+          "apiVersion": "monitoring.openshift.io/v1",
+          "kind": "Recommendation",
+          "metadata": {
+              "name": recommendation["rule_id"].replace("_", "-"),  # You cannot use underscores
+          },
+          "spec": {
+              "ruleID": recommendation["rule_id"],
+              "description": recommendation["description"],
+              ...
+          }}
+
+        api_instance.create_cluster_custom_object(
+            group="monitoring.openshift.io",
+            version="v1",
+            plural="recommendations",
+            body=crd_body,
+        )
+    ```
+
+    ---
+    # 3. Using Custom Resource Definitions
+
+    ```sh
+    $ oc get recommendations
+    NAME                                                     CREATED AT             TOTAL RISK
+    ccx-rules-ocp.external.rules.operator-unmanaged.report   2021-01-11T16:00:00Z   2
+    ```
+
+    --
+
+    ```sh
+    $ oc get recommendations -o wide
+    NAME                                                     DESCRIPTION                                                                             CREATED AT             TOTAL RISK   DETAILS
+    ccx-rules-ocp.external.rules.operator-unmanaged.report   OpenShift cluster can get damaged when an operator is configured to 'Unmanaged' state   2021-01-11T16:00:00Z   2            OpenShift cluster can get damaged when an operator is configured to 'Unmanaged' state.
+    ```
+
+    --
+    
+    ```sh
+    $ oc get recommendations/ccx-rules-ocp.external.rules.operator-unmanaged.report \
+        -o json | jq .spec.tags
+    [
+      "service_availability"
+    ]
+    ```
+
+    ---
+    
+    # 3. Using Custom Resource Definitions
+
+    ```sh
+    $ oc describe recommendations/ccx-rules-ocp.external.rules.operator-unmanaged.report
+    Name:         ccx-rules-ocp.external.rules.operator-unmanaged.report
+    Namespace:    
+    Labels:       <none>
+    Annotations:  <none>
+    API Version:  monitoring.openshift.io/v1
+    Kind:         Recommendation
+    Metadata:
+      Creation Timestamp:  2024-11-21T10:20:50Z
+      Generation:          1
+      Resource Version:    1468352
+      UID:                 c66042c1-79e3-41a6-8cbe-6d6061040d72
+    Spec:
+      created_at:        2021-01-11T16:00:00Z
+      Description:       OpenShift cluster can get damaged when an operator is configured to 'Unmanaged' state
+      ...
+
+      Tags:
+        service_availability
+      total_risk:  2
+      user_vote:   0
+    Events:        <none>
+    ```
+
+    ---
+
+    # 4. Comparison
+
+    | Feature              | CRDs                                                                                                                                                                     | kubectl Plugins                                                                                               |
+    |----------------------|--------------------------------------------------------------------------------------------------------------------------------------------------------------------------|---------------------------------------------------------------------------------------------------------------|
+    | **Definition**       | In cluster resource                                                                                                                                                      | Local executable                                                                                              |
+    | **Scope**            | Cluster-wide, managed via the Kubernetes API.                                                                                                                            | CLI-specific, user-centric extensions.                                                                        |
+    | **Use Case**         | Extend the kubernetes API.                                                                                                                                               | Simplifying or automating workflows at the CLI level.                                                         |
+    | **Pros**             | - Seamlessly integrated with Kubernetes. <br>- You get all the built-in functionalities<br>  from oc/kubectl like filtering f.e.                                         | - Simple to implement and use. <br>- No impact on the Kubernetes API server.<br>- No cluster resources needed |
+    | **Cons**             | - More complex to design and implement. <br>- Increases the load on the API server. <br>- Requires versioning and validation schemas.<br>- Need to follow OCP lifecycles | - Not reusable across API clients (e.g., operators). <br><br>- Requires users to install them manually.       |
+    | **Setup Complexity** | Moderate to High: Needs CRDs and potentially<br>controllers/operators, although we could reuse IO.                                                                       | Low: Simply distribute and install the script/binary.                                                         |
+
+    ---
+
+    # 5. Next steps
+    
+    - Try the [Kubernetes Aggregation Layer](https://kubernetes.io/docs/tasks/extend-kubernetes/configure-aggregation-layer/)
+
+    --
+
+    - Disconnected Insights? &#128064;
+    
+    --
+
+    - Extend to other resources:
+      - workload recommendations
+      - vulnerabilities...
+    --
+
+    - Offer this to our customers (reuse Insights Operator)
+      - We are already doing that in the `insightsReport` CR
+      - It could be opt-in/out on demand
+
+    ---
+
+    class: center, middle
+    ## Learn more:
+
+    https://github.com/juandspy/insights-on-the-cli
+
+   </textarea>
+<script src="https://remarkjs.com/downloads/remark-latest.min.js"></script>
+<script type="module">
+  import mermaid from 'https://cdn.jsdelivr.net/npm/mermaid@11/dist/mermaid.esm.min.mjs';
+</script>
+<script>
+  var slideshow = remark.create();
+</script>
